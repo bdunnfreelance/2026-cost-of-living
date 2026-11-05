@@ -1,0 +1,26 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Local financial data and databases
+/data/
+*.duckdb
+*.duckdb.wal
+*.db
+*.sqlite
+*.sqlite3
+
+# Power BI and generated exports/reports
+*.pbix
+*.pbit
+/output/
+/exports/
+
+# Local environment and editor settings
+.env
+.env.*
+!.env.example
+.vscode/
