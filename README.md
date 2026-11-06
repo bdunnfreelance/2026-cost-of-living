@@ -4,7 +4,25 @@ A local-first household transaction analysis project. Bank exports and the DuckD
 database stay on this computer; only source code and non-sensitive documentation
 belong in Git.
 
-## First stage: raw CSV import
+## Project layout
+
+```text
+2026 CostOfLiving/
+  src/cost_of_living/
+    __init__.py           # Python package marker
+    cli.py                # CSV importer and database commands
+  data/                   # Local CSV files and DuckDB database; ignored by Git
+  doc/                    # Project handover and notes
+  .venv/                  # Local Python environment; ignored by Git
+  pyproject.toml          # Package metadata and dependencies
+  .gitignore              # Keeps data and generated files out of Git
+  README.md
+```
+
+In VS Code, expand `src`, then `cost_of_living` in the Explorer to see the
+Python source. The main code is in `src/cost_of_living/cli.py`.
+
+## CSV import and database browsing
 
 The first supported CSV layout uses `Bank`, `Account`, `Date`, `Description`,
 `Debit`, and `Credit`; `Balance`, `Category`, and `SubCategory` are optional.
@@ -30,4 +48,8 @@ By default the local database is `data/transactions.duckdb`. The `data` folder
 is excluded from Git. Review `git status` before every commit or push. The
 provided sample is loaded locally; it contains 14 normalized rows. To view the
 normalized table in the terminal, run `cost-of-living show` (or add
-`--limit 100` to display more rows).
+`--limit 100` to display more rows). To browse the database in DuckDB's local
+web interface, run `cost-of-living browse`; the interface is at
+`http://localhost:4213` while the command remains running. Press Ctrl+C in the
+terminal to stop it. DuckDB may download its official UI extension the first
+time this command runs.

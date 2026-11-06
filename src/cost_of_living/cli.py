@@ -7,6 +7,7 @@ import csv
 import hashlib
 import json
 import re
+import threading
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -200,6 +201,8 @@ def main() -> None:
     viewer = subparsers.add_parser("show", help="Display normalized transactions in the terminal")
     viewer.add_argument("--database", type=Path, default=Path("data/transactions.duckdb"))
     viewer.add_argument("--limit", type=int, default=50, help="Maximum number of rows to display (default: 50)")
+    browser = subparsers.add_parser("browse", help="Open DuckDB's local browser interface")
+    browser.add_argument("--database", type=Path, default=Path("data/transactions.duckdb"))
     args = parser.parse_args()
 
     if args.command == "import":
@@ -219,6 +222,22 @@ def main() -> None:
             )
             relation.show(max_rows=args.limit)
         finally:
+            connection.close()
+    elif args.command == "browse":
+        if not args.database.is_file():
+            parser.error(f"Database not found: {args.database}")
+        connection = duckdb.connect(str(args.database.resolve()))
+        try:
+            connection.execute("CALL start_ui()")
+            print("DuckDB UI is running at http://localhost:4213. Press Ctrl+C to stop it.")
+            threading.Event().wait()
+        except KeyboardInterrupt:
+            print("Stopping DuckDB UI.")
+        finally:
+            try:
+                connection.execute("CALL stop_ui_server()")
+            except duckdb.Error:
+                pass
             connection.close()
 
 
