@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
+import json
+import re
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import duckdb
@@ -17,8 +22,100 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def parse_money(value: str | None, *, path: Path, row_number: int, column: str) -> Decimal | None:
+    """Parse an optional Excel-style amount without silently accepting bad data."""
+    text = (value or "").strip().replace("−", "-")
+    if not text or text in {"-", "—"}:
+        return None
+
+    text = text.replace(",", "").replace("$", "").replace("£", "").replace("€", "")
+    text = re.sub(r"\s+", "", text)
+    if text.startswith("(") and text.endswith(")"):
+        text = f"-{text[1:-1]}"
+    try:
+        return Decimal(text).quantize(Decimal("0.01"))
+    except InvalidOperation as exc:
+        raise ValueError(
+            f"{path.name}, row {row_number}: invalid amount in {column!r}"
+        ) from exc
+
+
+def parse_date(value: str | None, *, path: Path, row_number: int) -> date:
+    text = (value or "").strip()
+    for date_format in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, date_format).date()
+        except ValueError:
+            pass
+    raise ValueError(
+        f"{path.name}, row {row_number}: date must use day/month/year or ISO format"
+    )
+
+
+def clean_optional(value: str | None) -> str | None:
+    text = (value or "").strip()
+    return text or None
+
+
+def read_transactions(path: Path, fingerprint: str) -> tuple[list[tuple], list[tuple]]:
+    """Return raw JSON rows and normalized columns from one bank CSV."""
+    required = {"bank", "account", "date", "description", "debit", "credit"}
+    raw_rows: list[tuple] = []
+    clean_rows: list[tuple] = []
+    with path.open("r", encoding="utf-8-sig", newline="") as stream:
+        reader = csv.DictReader(stream)
+        if not reader.fieldnames:
+            raise ValueError(f"{path.name}: CSV has no header row")
+        missing = required - {header.strip().casefold() for header in reader.fieldnames if header}
+        if missing:
+            raise ValueError(f"{path.name}: missing required column(s): {', '.join(sorted(missing))}")
+
+        for row_number, original in enumerate(reader, start=2):
+            normalized = {
+                (key or "").strip().casefold(): (value or "").strip()
+                for key, value in original.items()
+                if key is not None
+            }
+            if not any(normalized.values()):
+                continue
+
+            bank = clean_optional(normalized.get("bank"))
+            account = clean_optional(normalized.get("account"))
+            description = clean_optional(normalized.get("description"))
+            if not bank or not account or not description:
+                raise ValueError(f"{path.name}, row {row_number}: Bank, Account and Description cannot be blank")
+
+            transaction_date = parse_date(normalized.get("date"), path=path, row_number=row_number)
+            debit = parse_money(normalized.get("debit"), path=path, row_number=row_number, column="Debit")
+            credit = parse_money(normalized.get("credit"), path=path, row_number=row_number, column="Credit")
+            balance = parse_money(normalized.get("balance"), path=path, row_number=row_number, column="Balance")
+            if debit is None and credit is None:
+                raise ValueError(f"{path.name}, row {row_number}: both Debit and Credit are blank")
+
+            # Expenses are positive in the source Debit column; credits are
+            # positive in Credit. Subtraction also treats negative debits as refunds.
+            amount = (credit or Decimal("0.00")) - (debit or Decimal("0.00"))
+            raw_rows.append((fingerprint, path.name, row_number - 1, json.dumps(original, ensure_ascii=False)))
+            clean_rows.append((
+                fingerprint,
+                path.name,
+                row_number - 1,
+                bank,
+                account,
+                transaction_date,
+                description,
+                debit,
+                credit,
+                amount,
+                balance,
+                clean_optional(normalized.get("category")),
+                clean_optional(normalized.get("subcategory")),
+            ))
+    return raw_rows, clean_rows
+
+
 def import_csvs(source: Path, database: Path) -> int:
-    """Import CSV files as raw rows, skipping files already imported by content."""
+    """Import CSV files as raw and normalized rows, skipping identical content."""
     files = sorted(source.glob("*.csv")) if source.is_dir() else [source]
     files = [path for path in files if path.is_file() and path.suffix.lower() == ".csv"]
     if not files:
@@ -42,6 +139,24 @@ def import_csvs(source: Path, database: Path) -> int:
             record JSON NOT NULL
         )
     """)
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS transactions (
+            source_sha256 VARCHAR NOT NULL,
+            source_name VARCHAR NOT NULL,
+            row_number BIGINT NOT NULL,
+            bank VARCHAR NOT NULL,
+            account VARCHAR NOT NULL,
+            transaction_date DATE NOT NULL,
+            description VARCHAR NOT NULL,
+            debit DECIMAL(18, 2),
+            credit DECIMAL(18, 2),
+            amount DECIMAL(18, 2) NOT NULL,
+            balance DECIMAL(18, 2),
+            category VARCHAR,
+            subcategory VARCHAR,
+            PRIMARY KEY (source_sha256, row_number)
+        )
+    """)
 
     added = 0
     try:
@@ -54,21 +169,20 @@ def import_csvs(source: Path, database: Path) -> int:
                 print(f"Skipped (already imported): {path.name}")
                 continue
 
-            # DuckDB infers the CSV columns; storing each row as JSON keeps this
-            # first stage tolerant of different bank export formats.
-            safe_path = path.resolve().as_posix().replace("'", "''")
-            rows = connection.execute(
-                f"SELECT to_json(t) FROM read_csv_auto('{safe_path}', header=true) AS t"
-            ).fetchall()
-            connection.executemany(
-                "INSERT INTO transactions_raw VALUES (?, ?, ?, ?)",
-                [(fingerprint, path.name, index, row[0]) for index, row in enumerate(rows, 1)],
-            )
-            connection.execute(
-                "INSERT INTO imported_files (sha256, source_name, row_count) VALUES (?, ?, ?)",
-                [fingerprint, path.name, len(rows)],
-            )
-            print(f"Imported {len(rows)} rows: {path.name}")
+            raw_rows, clean_rows = read_transactions(path, fingerprint)
+            connection.execute("BEGIN TRANSACTION")
+            try:
+                connection.executemany("INSERT INTO transactions_raw VALUES (?, ?, ?, ?)", raw_rows)
+                connection.executemany("INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", clean_rows)
+                connection.execute(
+                    "INSERT INTO imported_files (sha256, source_name, row_count) VALUES (?, ?, ?)",
+                    [fingerprint, path.name, len(clean_rows)],
+                )
+                connection.execute("COMMIT")
+            except Exception:
+                connection.execute("ROLLBACK")
+                raise
+            print(f"Imported {len(clean_rows)} rows: {path.name}")
             added += 1
     finally:
         connection.close()

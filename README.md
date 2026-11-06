@@ -6,9 +6,18 @@ belong in Git.
 
 ## First stage: raw CSV import
 
-The importer stores each row as JSON so different bank CSV layouts can be loaded
-before choosing a common transaction schema. It records a SHA-256 fingerprint
-for each source file and skips identical files on later runs.
+The first supported CSV layout uses `Bank`, `Account`, `Date`, `Description`,
+`Debit`, and `Credit`; `Balance`, `Category`, and `SubCategory` are optional.
+Headers are matched without case or surrounding whitespace, and dates accept
+Australian day/month/year or ISO format. Each source row is kept as JSON in
+`transactions_raw` and also mapped to typed columns in `transactions`. `amount`
+is calculated as Credit minus Debit, so expenses are negative and credits or
+refunds are positive.
+
+The importer records a SHA-256 fingerprint for each source file and skips an
+identical file on later runs. It keeps rows from different files even when they
+look identical: the current spreadsheet has no unique transaction ID, so
+overlapping exports need a later review before they can be safely deduplicated.
 
 ```powershell
 python -m venv .venv
@@ -17,4 +26,5 @@ python -m venv .venv
 ```
 
 By default the local database is `data/transactions.duckdb`. The `data` folder
-is excluded from Git. Review `git status` before every commit or push.
+is excluded from Git. Review `git status` before every commit or push. The
+provided sample is loaded locally; it contains 14 normalized rows.
