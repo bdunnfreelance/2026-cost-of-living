@@ -87,6 +87,8 @@ def read_transactions(path: Path, fingerprint: str) -> tuple[list[tuple], list[t
 
             transaction_date = parse_date(normalized.get("date"), path=path, row_number=row_number)
             debit = parse_money(normalized.get("debit"), path=path, row_number=row_number, column="Debit")
+            if debit is not None:
+                debit = abs(debit)
             credit = parse_money(normalized.get("credit"), path=path, row_number=row_number, column="Credit")
             balance = parse_money(normalized.get("balance"), path=path, row_number=row_number, column="Balance")
             if debit is None and credit is None:
@@ -195,11 +197,29 @@ def main() -> None:
     importer = subparsers.add_parser("import", help="Import CSV files")
     importer.add_argument("source", type=Path, help="CSV file or folder containing CSV files")
     importer.add_argument("--database", type=Path, default=Path("data/transactions.duckdb"))
+    viewer = subparsers.add_parser("show", help="Display normalized transactions in the terminal")
+    viewer.add_argument("--database", type=Path, default=Path("data/transactions.duckdb"))
+    viewer.add_argument("--limit", type=int, default=50, help="Maximum number of rows to display (default: 50)")
     args = parser.parse_args()
 
     if args.command == "import":
         count = import_csvs(args.source, args.database)
         print(f"Finished: {count} new file(s) imported into {args.database}")
+    elif args.command == "show":
+        if args.limit < 1:
+            parser.error("--limit must be at least 1")
+        if not args.database.is_file():
+            parser.error(f"Database not found: {args.database}")
+        connection = duckdb.connect(str(args.database), read_only=True)
+        try:
+            relation = connection.sql(
+                "SELECT bank, account, transaction_date, description, debit, credit, amount, "
+                "balance, category, subcategory FROM transactions "
+                f"ORDER BY transaction_date, row_number LIMIT {args.limit}"
+            )
+            relation.show(max_rows=args.limit)
+        finally:
+            connection.close()
 
 
 if __name__ == "__main__":
