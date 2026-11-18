@@ -1,0 +1,25 @@
+Actual Spending = SUM(transactions[Debit])
+
+Actual Income = SUM(transactions[Credit])
+
+Net Cash Flow = [Actual Income] - [Actual Spending]
+
+Transaction Count = COUNTROWS(transactions)
+
+Uncategorised Transactions =
+    CALCULATE(
+        [Transaction Count],
+        FILTER(transactions, ISBLANK(transactions[Payment Category]))
+    )
+
+Regular Spending =
+    CALCULATE(
+        [Actual Spending],
+        transactions[Cash Flow] = "Regular"
+    )
+
+Regular Income =
+    CALCULATE(
+        [Actual Income],
+        transactions[Cash Flow] = "Regular"
+    )

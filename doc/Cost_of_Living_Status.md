@@ -1,52 +1,67 @@
-# Cost of Living Project — Handover
+# Cost of Living Project — Status
+
+For the requirement-by-requirement Power BI handover and recommended work sequence, see [Project Handover.md](Project%20Handover.md).
 
 ## Goal
 
-Build a simple, local-first family cost-of-living and financial analysis project. Bank transactions are downloaded as CSV files. The user wants to analyse them with pivot-style summaries and charts, and ideally update the data with a desktop shortcut or a simple script.
+Build a simple, local-first household cost-of-living and financial analysis project from bank transaction CSV files. The end goal is a dashboard that shows how the household is tracking against its budget and lets us drill down into where expenses are occurring.
 
-## Decisions so far
+## Decisions
 
-- Prioritise getting a working version quickly on Windows. Linux/Kubuntu portability can be revisited later.
-- Recommended stack: Python for CSV import/cleanup, DuckDB for a file-based database, and Power BI Desktop for pivots/charts.
-- DuckDB was selected because it stores data in a local database file and runs in-process rather than requiring a continuously running database server.
-- Power BI Desktop reports can be kept local. Do not publish them to Power BI Service because publishing uploads report/model data.
-- Keep code in Git and back that up to a private cloud repository if desired. Keep financial data out of cloud sync and Git.
-- The project and data locations should be distinct. The user initially planned `C:\Dev\2026 CostOfLiving` and `C:\Dev\2026 CostOfLiving\data`; remind them that if `data` is inside the Git project, it must be excluded from Git, and a separate local-only data folder is safer.
+- Prioritise a working version on Windows; Linux/Kubuntu portability can be revisited later.
+- Use Python for CSV import and cleanup, DuckDB for a local file-based database, and Power BI Desktop for budget summaries and charts.
+- Keep financial data local. Do not publish reports to Power BI Service or commit bank exports, databases, or reports containing transaction data.
+- Keep project code and data in separate locations where practical. The current `data/` folder is inside the project but is excluded from Git.
 
-## Current environment and progress
+## First-version specification
 
-- Project folder: `C:\Dev\2026 CostOfLiving`
-- VS Code is now opened in a local Windows window, not a WSL remote window.
-- VS Code integrated terminal is PowerShell and prompt is `PS C:\Dev\2026 CostOfLiving>`.
-- Git is installed: `git version 2.54.0.windows.1`.
-- A local Git repository was initialized successfully with `git init`.
-- Python is installed: `Python 3.13.5` (`py --version` worked).
-- The user has Codex available as a plug-in in VS Code and asked whether it can perform setup steps. Advice was yes: ask it to make one limited change at a time, review commands, and keep bank data out of Git.
-- A PowerShell `while ($true) { Clear-Host; Get-Date; ollama ps; Start-Sleep -Seconds 1 }` loop appeared in the terminal. The user was instructed to stop it with Ctrl+C before continuing. It is unrelated to this project setup; confirm the terminal is back at the prompt if necessary.
+The current Excel prototype is documented in [Excel Prototype.md](Excel%20Prototype.md) and is the starting specification for the app. It describes:
 
-## Guidance for continuing
+- A normalized transaction ledger with bank/account, date, description, debit/credit, optional balance, and bank-provided categories.
+- Budget categories grouped into higher-level category groups, with cash-flow types: Regular, One-off, Transfer, and Unused.
+- Manual category mappings for exceptions and text-search mapping rules for recurring descriptions.
+- Mapping diagnostics, including rule matches, uncategorized transactions, mapping usage, and category totals.
+- Yearly and monthly income and expense summaries, drillable by category group, category, account, and description.
+- A dashboard outcome: show progress against budget and allow drill-down into expense detail.
 
-The user asked for instructions one step at a time and will say “next step” when ready. Continue in that cadence; do not provide a long batch of setup steps.
+Prototype reference data is now stored in the ignored `data/9. reference/` folder: `Prototype - Budget Categories.csv`, `Prototype - Mapping Rules.csv`, and `Prototype - Description Mapping (sample).csv`. These provide the category/group/cash-flow list, matching rules, and examples of account-specific manual mappings. The budget categories file contains usage counts and historical amounts, but it does not contain planned budget amounts.
 
-Suggested next steps:
+The category list and mapping rules are now supplied. The manual mapping sample uses an account-plus-description key (`DescId`), so use that for manual overrides. Mapping rules apply in this order: specific Payee rules first, then generic Vendor Type rules; within each type, use row order. Planned budget amounts and their period (for example, monthly category amounts or annual amounts distributed monthly) are not yet supplied. The sample manual mapping file is only a sample, not the full mapping table. The user is deciding how much personal mapping data Codex may see and whether development and live data should be separated.
 
-1. Confirm the terminal is at the PowerShell prompt and the Ollama loop has stopped.
-2. Create a Python virtual environment: `py -m venv .venv`.
-3. Add `.venv/`, data, DuckDB database files, and generated report/export files to `.gitignore` before committing anything. Do not put sensitive values or financial records in tracked files.
-4. Activate the environment in PowerShell: `\.venv\Scripts\Activate.ps1` (if execution policy blocks this, use a session-scoped workaround or VS Code Python interpreter selection rather than changing machine-wide policy).
-5. Create a minimal Python project and install only the needed packages (initially likely `duckdb`; add other packages when the import/report workflow requires them).
-6. Create a private GitHub repository and connect it as `origin` only after reviewing `git status` and `.gitignore` to ensure there are no transaction files, database files, or sensitive reports staged.
-7. Later, configure Power BI Desktop to read DuckDB through the DuckDB ODBC driver and Power Query ODBC connector. Align 64-bit/32-bit driver and Power BI installations.
-8. Build a repeatable CSV import that tracks processed files and handles duplicate/re-downloaded transactions safely. Power BI’s imported model will also need refreshing after the database load.
+## Current status
 
-## Security notes
+- Project folder: `C:\Dev\2026 CostOfLiving`.
+- Git repository initialized; there are no commits yet.
+- Python 3.13 environment is set up in `.venv/`; DuckDB is declared in `pyproject.toml`.
+- The admin CLI imports CSVs into `data/2. transform/cost_of_living.duckdb`, normalizes transactions, preserves source rows, and skips an identical source file by fingerprint. It does not deduplicate overlapping exports because the source data currently has no unique transaction ID.
+- Bank import adapters now cover the supplied Westpac, St George Visa, St George Work, and headerless Bendigo samples. Bendigo's account is `Savings`; negative amounts map to Debit and positive amounts to Credit.
+- Reference CSVs are stored in `data/9. reference/`; bank exports are kept in `data/1. extract/` and only the latter is scanned by the import command.
+- `transactions_enriched` is a DuckDB view that calculates manual category, rule-based category, effective payment category, match explanation, category group, and cash-flow type.
+- `monthly_actuals` and `yearly_actuals` views summarize debit, credit, net amount, and transaction count by period, category group, category, cash-flow type, and account. Budget targets are still pending.
+- The CLI exports one enriched Parquet dataset under `data/3. load/` with 18 transaction and category fields, including mapping diagnostics and category metadata. Power BI handles date grouping and calculates monthly and yearly totals from transactions.
+- The database stores `source_sha256` as a content fingerprint to skip reimporting identical files and identify rows from a source file; the original filename is stored separately in `source_name`. The hash is not exported to Power BI.
+- A first-report guide in `doc/Power BI Actuals Dashboard.md` gives the Power BI Parquet import steps, actuals measures, and suggested visuals.
+- Power Query and DAX starter assets are in `powerbi/`: a query for the transaction Parquet file, actuals measures, and a setup guide. The user confirmed Power BI refreshed the current single-table export.
+- The four supplied bank samples were imported into a temporary database during verification: 21 rows normalized successfully. Synthetic and sample checks also confirmed the enriched view fields.
+- `.gitignore` excludes `.venv/`, `data/`, DuckDB files, Power BI files, generated exports, and local environment files.
+- Budget-versus-actual analysis remains deferred until monthly budget amounts are supplied.
+- The working tree currently contains uncommitted code and documentation changes. Review them before creating the first commit or connecting a remote repository.
 
-- Never commit bank CSVs, the `.duckdb` database, Power BI reports containing imported transaction data, or exports containing transaction data.
-- A `.gitignore` is a useful guard, not proof that a secret was never committed. Review `git status` and staged diffs before every push.
-- Keep sensitive data outside OneDrive/Dropbox/other synced folders if the goal is no cloud copy.
-- Do not publish the Power BI report to the Power BI Service. Keep visual assets and any extensions local; network activity can vary by tool and feature, so strict no-egress requirements need firewall/network controls.
-- Back up the local database separately to a secure offline location; cloud-backup only the code and non-sensitive documentation.
+## Next steps
 
-## Handover note
+1. Confirm the single enriched Parquet export loads in Power BI and inspect actuals totals and category fields.
+2. Review and refine the actuals dashboard in Power BI before starting budget work.
+3. Add monthly budget amounts when ready, then build budget-versus-actual summaries by category group, category, account, and description.
+4. Review Git status and staged changes before a first commit; financial data and reports remain excluded.
 
-This file contains project context, not financial data. Continue by helping the user one step at a time from the current setup, and verify each step with them before advancing.
+Mapping category names that differ from the category list only by capitalization are now normalized to the category-list spelling when reference files load. Truly unknown category names remain allowed and produce warnings.
+
+Continue one step at a time and review each outcome before moving on.
+
+## Security and backup
+
+- Never commit bank CSVs, the `.duckdb` database, Power BI reports with imported transactions, or exports containing transaction data.
+- `data/` is currently inside the Git project, but `.gitignore` excludes it. Check Git status and staged changes before every commit or push.
+- Keep sensitive data outside OneDrive/Dropbox or other synced folders if the goal is to avoid cloud copies.
+- Keep the Power BI report local; do not publish it to Power BI Service.
+- Back up the local database separately to a secure offline location. Cloud backup should contain only code and non-sensitive documentation.
