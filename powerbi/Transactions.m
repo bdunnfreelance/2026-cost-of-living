@@ -24,7 +24,8 @@ let
             {"Rule Based Category", type text},
             {"Category Group", type text},
             {"Cash Flow", type text},
-            {"Comment", type text}
+            {"Comment", type text},
+            {"Data Status", type text}
         }
     )
 in

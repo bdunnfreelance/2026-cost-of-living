@@ -12,6 +12,8 @@ __pycache__/
 *.db
 *.sqlite
 *.sqlite3
+*.xlsx
+*.csv
 
 # Power BI and generated exports/reports
 *.pbix

@@ -7,7 +7,7 @@ Here are the main working sheets. There are other sheets that are for separate b
 
 1. Transactions - contains all normalised transactions from all relevant bank accounts
 2. Budget Categories - lists all the categories and category groups that we use to track income and expenses
-3. Category Mapping - each line maps a transaction to a budget category. Use this for unusual one-off transactions.
+3. Category Mapping - each line maps a transaction to a budget category. Use this for unusual one off transactions.
 4. Mapping Rules - each line contains a search string. Any transaction description that contains this string is mapped to a category
 5. Cost of Living - contains pivot tables to summarise expenses by category and category group
 6. Income - contains pivot tables to summarise income by category and category group
@@ -19,6 +19,7 @@ Here are the main working sheets. There are other sheets that are for separate b
 
 All transactions downloaded from online banking have been normalised and loaded into this sheet. Here are the collumns and their purpose:
 
+Sheet Name: Transactions
 Table Name: Transaction
 
 #### Raw Data Fields
@@ -62,15 +63,16 @@ Rule Based Category	- test if each transaction maps to a Budget Category via the
     ```=XLOOKUP( TRUE, ISNUMBER(SEARCH(MappingRules[MatchText],[@Description])), MappingRules[Payment Category], "" )```
 
 
-## Sheet - Category Groups
+## Sheet - Categories and Category Groups
 
+Sheet Name: Categories
 Table Name: CategoryGroup
 
 #### Raw Data Fields
 
 Payment Category	- name of category
 Category Group	    - higher level grouping
-Cash Flow	        - type of category: Regular, One-off, Transfer, Unused
+Cash Flow	        - type of category: Regular, One Off, Transfer, Unused
 Comment             - free text comment field
 
 #### Calculated Fields
@@ -87,10 +89,11 @@ Times Used in Rules	    - count number of times this category is used in the map
 
 ## Sheet - Category Mapping
 
-Each line maps a transaction to a budget category. Use this for unusual one-off transactions.
+Each line maps a transaction to a budget category. Use this for unusual one off transactions.
 
 Note: there are some debug columns to determine if a manual mapping can be deleted in favour of a mapping rule.
 
+Sheet Name: Description Mapping
 Table Name: CategoryMap
 
 #### Raw Data Fields
@@ -140,6 +143,7 @@ Rule priority is:
 a. Rule Type: Specific Payees first, then generic Vendor Types
 b. Row order
 
+Sheet Name: Mapping Rules
 Table Name: MappingRules
 
 #### Raw Data Fields
