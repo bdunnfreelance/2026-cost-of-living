@@ -61,13 +61,15 @@ def _load_excel_extension(connection: duckdb.DuckDBPyConnection) -> None:
         ) from exc
 
 
-def load_reference_workbook(connection: duckdb.DuckDBPyConnection, workbook: Path) -> dict[str, int]:
+def load_reference_workbook(
+    connection: duckdb.DuckDBPyConnection, workbook: Path, *, quiet: bool = False
+) -> dict[str, int]:
     """Replace the reference tables from the Excel workbook and return the row counts.
 
     Bad or blank values in the sheets never stop the load: every row is loaded, and problems
     show up as flags in the exported data (see the Data Status column). Only a missing
     workbook, sheet or column header stops it. All-or-nothing: on any error the previous
-    reference tables are left untouched.
+    reference tables are left untouched. With quiet=True the per-sheet progress lines are skipped.
     """
     if not workbook.is_file():
         raise FileNotFoundError(f"Reference workbook not found: {workbook}")
@@ -96,11 +98,12 @@ def load_reference_workbook(connection: duckdb.DuckDBPyConnection, workbook: Pat
                 f"if a column is missing, fix the header in Excel.\n"
                 f"  DuckDB said: {detail}"
             ) from exc
-        print(f"Reading {workbook.name}")
-        for sheet, table in ((SHEET_CATEGORIES, "ref_categories"), (SHEET_MANUAL_MAP, "ref_manual_map"),
-                             (SHEET_RULES, "ref_rules")):
-            count, last = connection.execute(f"SELECT count(*), max(sheet_row) FROM extract.{table}").fetchone()
-            print(f"  Sheet '{sheet}': {count} row(s) read, down to Excel row {last}")
+        if not quiet:
+            print(f"Reading {workbook.name}")
+            for sheet, table in ((SHEET_CATEGORIES, "ref_categories"), (SHEET_MANUAL_MAP, "ref_manual_map"),
+                                 (SHEET_RULES, "ref_rules")):
+                count, last = connection.execute(f"SELECT count(*), max(sheet_row) FROM extract.{table}").fetchone()
+                print(f"  Sheet '{sheet}': {count} row(s) read, down to Excel row {last}")
         connection.execute(_sql("20_transform_reference.sql"))
         counts = {
             table: connection.execute(f"SELECT count(*) FROM transform.{table}").fetchone()[0]

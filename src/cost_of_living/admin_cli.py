@@ -231,8 +231,12 @@ def is_transaction_csv(path: Path) -> bool:
     )
 
 
-def import_csvs(source: Path, database: Path) -> int:
-    """Import CSV files as raw and normalized rows, skipping identical content."""
+def import_csvs(source: Path, database: Path, *, quiet: bool = False) -> tuple[int, int]:
+    """Import CSV files as raw and normalized rows, skipping identical content.
+
+    Returns (files imported, files skipped as already imported). Newly imported files are always
+    reported; with quiet=True the per-file "already imported" lines are not printed.
+    """
     files = sorted(source.glob("*.csv")) if source.is_dir() else [source]
     files = [path for path in files if path.is_file() and path.suffix.lower() == ".csv"]
     if not files:
@@ -247,11 +251,12 @@ def import_csvs(source: Path, database: Path) -> int:
         files = bank_files
         if not files:
             print(f"No bank transaction CSVs found in {source}. Reference files were left untouched.")
-            return 0
+            return 0, 0
 
     connection = open_database(database)  # creates schemas, tables and views if needed
 
     added = 0
+    skipped = 0
     try:
         for path in files:
             fingerprint = file_sha256(path)
@@ -259,7 +264,9 @@ def import_csvs(source: Path, database: Path) -> int:
                 "SELECT 1 FROM extract.imported_files WHERE sha256 = ?", [fingerprint]
             ).fetchone()
             if exists:
-                print(f"Skipped (already imported): {path.name}")
+                skipped += 1
+                if not quiet:
+                    print(f"Skipped (already imported): {path.name}")
                 continue
 
             raw_rows, clean_rows = read_transactions(path, fingerprint)
@@ -284,7 +291,7 @@ def import_csvs(source: Path, database: Path) -> int:
             added += 1
     finally:
         connection.close()
-    return added
+    return added, skipped
 
 
 def export_actuals(database: Path, output_folder: Path) -> list[Path]:
@@ -317,6 +324,23 @@ def export_actuals(database: Path, output_folder: Path) -> list[Path]:
         connection.close()
 
 
+def update_all(source: Path, database: Path, reference: Path, output: Path) -> None:
+    """Run the whole routine: import bank files, reload the reference workbook, export for
+    Power BI, then print the status summary."""
+    print("Updating: import, reference data, Power BI export...")
+    print(f"  Transactions: {source}")
+    print(f"  Reference:    {reference.parent}")
+    print(f"  Output:       {output}", flush=True)
+    import_csvs(source, database, quiet=True)
+    connection = open_database(database)
+    try:
+        load_reference_workbook(connection, reference, quiet=True)
+    finally:
+        connection.close()
+    export_actuals(database, output)
+    print_status(database, reference, output / "transactions.parquet", PROJECT_ROOT)
+
+
 def run() -> None:
     # DuckDB's relation display uses box-drawing characters that some Windows
     # PowerShell code pages cannot encode. Replace unsupported display glyphs
@@ -333,6 +357,15 @@ def run() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="command")
+    updater = subparsers.add_parser(
+        "update", help="Do everything: import, load-mappings, export-actuals, then show status.",
+        description="Import new bank CSVs, reload the reference workbook, export the Parquet file for "
+                    "Power BI, and print a short status summary.",
+    )
+    updater.add_argument("source", type=Path, nargs="?", default=DEFAULT_IMPORT_FOLDER, help=f"CSV file or folder (default: {DEFAULT_IMPORT_FOLDER})")
+    updater.add_argument("--database", type=Path, default=DEFAULT_DATABASE, help=f"DuckDB file to update (default: {DEFAULT_DATABASE})")
+    updater.add_argument("--reference", type=Path, default=DEFAULT_REFERENCE_WORKBOOK, help=f"Reference workbook (default: {DEFAULT_REFERENCE_WORKBOOK})")
+    updater.add_argument("--output", type=Path, default=DEFAULT_REPORT_FOLDER, help=f"Folder for generated Parquet files (default: {DEFAULT_REPORT_FOLDER})")
     importer = subparsers.add_parser(
         "import", help="Add bank CSV transactions to DuckDB (writes transaction data).",
         description="Import one CSV or all CSV files in a folder. Identical files are skipped.",
@@ -377,9 +410,11 @@ def run() -> None:
         parser.print_help()
         return
 
-    if args.command == "import":
-        count = import_csvs(args.source, args.database)
-        print(f"Finished: {count} new file(s) imported into {args.database}")
+    if args.command == "update":
+        update_all(args.source, args.database, args.reference, args.output)
+    elif args.command == "import":
+        added, skipped = import_csvs(args.source, args.database)
+        print(f"Finished: {added} new file(s) imported, {skipped} already imported ({args.database})")
     elif args.command == "show":
         if args.limit < 1:
             parser.error("--limit must be at least 1")
