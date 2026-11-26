@@ -21,9 +21,10 @@ WITH base AS (
             ELSE '(Uncategorised)'
         END AS matching_rule
     FROM transform.transactions AS t
+    -- Manual mappings match on Description only (the Account column is not used for matching).
+    -- The cleaning step keeps one row per description, so this join cannot duplicate transactions.
     LEFT JOIN transform.manual_category_mappings AS manual
-      ON lower(trim(t.account)) = lower(trim(manual.account))
-     AND lower(trim(t.description)) = lower(trim(manual.description))
+      ON lower(trim(t.description)) = lower(trim(manual.description))
     LEFT JOIN LATERAL (
         SELECT rule.match_text, rule.payment_category
         FROM transform.mapping_rules AS rule

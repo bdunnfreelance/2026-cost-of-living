@@ -19,8 +19,10 @@ WHERE nullif(trim("Payment Category"), '') IS NOT NULL
 QUALIFY row_number() OVER (PARTITION BY lower(trim("Payment Category")) ORDER BY sheet_row) = 1
 ORDER BY sheet_row;
 
--- Manual category spelling is normalised to the category list's spelling. A row with no Account
--- or Description is kept (as an empty string) but can never match a transaction.
+-- Manual category spelling is normalised to the category list's spelling. Manual mappings are matched
+-- on Description only (the Account column is kept for information but is not used to match), so only
+-- the first row for each Description is kept. A row with no Description is kept (as an empty string)
+-- but can never match a transaction.
 INSERT INTO transform.manual_category_mappings
 SELECT coalesce(trim(m."Account"), ''),
        coalesce(trim(m."Description"), ''),
@@ -32,7 +34,7 @@ WHERE NOT (nullif(trim(m."Account"), '') IS NULL
        AND nullif(trim(m."Description"), '') IS NULL
        AND nullif(trim(m."Manual Category"), '') IS NULL)
 QUALIFY row_number() OVER (
-            PARTITION BY lower(coalesce(trim(m."Account"), '')), lower(coalesce(trim(m."Description"), ''))
+            PARTITION BY lower(coalesce(trim(m."Description"), ''))
             ORDER BY m.sheet_row) = 1
 ORDER BY m.sheet_row;
 
